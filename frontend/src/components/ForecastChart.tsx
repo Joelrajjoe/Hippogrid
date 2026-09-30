@@ -1,19 +1,17 @@
-import React, { useState } from 'react';
-import { TrendingUp } from 'lucide-react';
-
-interface ForecastDataPoint {
-  record_date: string;
-  actual: number;
-  forecast: number;
-  upper_bound: number;
-}
+/**
+ * HippoGrid Forecast Chart — Dynamic (Phase 5 + Phase 6)
+ * Fetches actual XGBoost + Split Conformal data from the live backend.
+ * Falls back to deterministic sample data if backend is not running.
+ */
+import React, { useState, useEffect } from 'react';
+import { TrendingUp, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { api, ForecastPoint } from '../services/api';
 
 interface ForecastChartProps {
   initialTarget?: string;
 }
 
-// Sample recent trajectory for immediate high-fidelity rendering
-const SAMPLE_TRAJECTORY: ForecastDataPoint[] = [
+const SAMPLE_TRAJECTORY: ForecastPoint[] = [
   { record_date: '2025-06-16', actual: 44, forecast: 42, upper_bound: 52 },
   { record_date: '2025-06-17', actual: 38, forecast: 40, upper_bound: 50 },
   { record_date: '2025-06-18', actual: 42, forecast: 41, upper_bound: 51 },
@@ -33,35 +31,57 @@ const SAMPLE_TRAJECTORY: ForecastDataPoint[] = [
 
 export const ForecastChart: React.FC<ForecastChartProps> = ({ initialTarget = 'diarrhoeal_cases' }) => {
   const [selectedTarget, setSelectedTarget] = useState<string>(initialTarget);
-  const [dataPoints] = useState<ForecastDataPoint[]>(SAMPLE_TRAJECTORY);
+  const [dataPoints, setDataPoints] = useState<ForecastPoint[]>(SAMPLE_TRAJECTORY);
+  const [mae, setMae] = useState<number | null>(null);
+  const [coverage, setCoverage] = useState<number | null>(null);
+  const [smape, setSmape] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+
+  const loadForecast = async (target: string) => {
+    setLoading(true);
+    try {
+      const res = await api.forecast(target, 15);
+      // API returns data_points
+      const pts: ForecastPoint[] = res.data_points || SAMPLE_TRAJECTORY;
+      setDataPoints(pts.length > 0 ? pts : SAMPLE_TRAJECTORY);
+      setMae(res.metrics?.mae ?? null);
+      setCoverage(res.metrics?.coverage ?? null);
+      setSmape(res.metrics?.smape ?? null);
+      setBackendOnline(true);
+    } catch {
+      setDataPoints(SAMPLE_TRAJECTORY);
+      setBackendOnline(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadForecast(selectedTarget);
+  }, [selectedTarget]);
 
   // SVG Chart Geometry
   const width = 680;
   const height = 240;
   const padding = { top: 20, right: 30, bottom: 35, left: 45 };
-
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
   const maxVal = Math.max(...dataPoints.map((d) => Math.max(d.actual, d.upper_bound))) * 1.15;
   const minVal = 0;
 
-  const getX = (idx: number) => padding.left + (idx / (dataPoints.length - 1)) * plotW;
+  const getX = (idx: number) => padding.left + (idx / Math.max(dataPoints.length - 1, 1)) * plotW;
   const getY = (val: number) => padding.top + plotH - ((val - minVal) / (maxVal - minVal)) * plotH;
 
-  // Build SVG path for Actual line
   const actualPath = dataPoints.reduce(
     (acc, d, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(d.actual)}`,
     ''
   );
-
-  // Build SVG path for Forecast line
   const forecastPath = dataPoints.reduce(
     (acc, d, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(d.forecast)}`,
     ''
   );
-
-  // Build SVG polygon for Conformal Upper Bound Area (from forecast to upper_bound)
   const upperAreaTop = dataPoints.map((d, i) => `${getX(i)},${getY(d.upper_bound)}`).join(' ');
   const upperAreaBottom = [...dataPoints]
     .reverse()
@@ -75,7 +95,7 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ initialTarget = 'd
         <div className="panel-header-text">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <TrendingUp size={20} color="#0284c7" />
-            <h3 style={{ margin: 0 }}>Demand & Caseload Trajectory</h3>
+            <h3 style={{ margin: 0 }}>Demand &amp; Caseload Trajectory</h3>
             <span
               style={{
                 fontSize: '0.72rem',
@@ -87,6 +107,14 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ initialTarget = 'd
               }}
             >
               XGBoost + Split Conformal (90%)
+            </span>
+            {/* Live/Offline Indicator */}
+            <span
+              title={backendOnline ? 'Live backend data' : 'Using sample data (backend offline)'}
+              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', color: backendOnline ? '#059669' : '#94a3b8' }}
+            >
+              {backendOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
+              {backendOnline === null ? 'Connecting...' : backendOnline ? 'Live' : 'Offline'}
             </span>
           </div>
           <p style={{ margin: '4px 0 0 0' }}>
@@ -113,102 +141,56 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ initialTarget = 'd
             <option value="fever_cases">Fever Cases</option>
             <option value="medicine_consumption">ORS Medicine Consumption</option>
           </select>
+          <button
+            onClick={() => loadForecast(selectedTarget)}
+            disabled={loading}
+            title="Refresh from backend"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '6px 10px', borderRadius: '8px',
+              border: '1px solid #cbd5e1', background: '#f8fafc',
+              fontSize: '0.78rem', fontWeight: 600, cursor: loading ? 'wait' : 'pointer',
+              color: '#334155',
+            }}
+          >
+            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
         </div>
       </div>
 
       {/* SVG Canvas Area Chart */}
-      <div style={{ overflowX: 'auto', background: '#f8fafc', borderRadius: '12px', padding: '12px' }}>
+      <div style={{ overflowX: 'auto', background: '#f8fafc', borderRadius: '12px', padding: '12px', position: 'relative' }}>
+        {loading && (
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(248,250,252,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '12px', zIndex: 10, fontSize: '0.85rem', fontWeight: 600, color: '#0284c7' }}>
+            Fetching XGBoost forecast from backend...
+          </div>
+        )}
         <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', maxHeight: '260px' }}>
-          {/* Horizontal Grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map((pct) => {
             const y = padding.top + plotH * (1 - pct);
             const val = Math.round(minVal + (maxVal - minVal) * pct);
             return (
               <g key={pct}>
-                <line
-                  x1={padding.left}
-                  y1={y}
-                  x2={width - padding.right}
-                  y2={y}
-                  stroke="#e2e8f0"
-                  strokeDasharray={pct === 0 ? '0' : '4 4'}
-                />
-                <text
-                  x={padding.left - 8}
-                  y={y + 4}
-                  textAnchor="end"
-                  fontSize="10"
-                  fill="#94a3b8"
-                  fontWeight="500"
-                >
-                  {val}
-                </text>
+                <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="#e2e8f0" strokeDasharray={pct === 0 ? '0' : '4 4'} />
+                <text x={padding.left - 8} y={y + 4} textAnchor="end" fontSize="10" fill="#94a3b8" fontWeight="500">{val}</text>
               </g>
             );
           })}
-
-          {/* 90% Conformal Uncertainty Band (Shaded Area) */}
-          <polygon
-            points={conformalBandPolygon}
-            fill="rgba(56, 189, 248, 0.18)"
-            stroke="none"
-          />
-
-          {/* Upper bound dashed line */}
+          <polygon points={conformalBandPolygon} fill="rgba(56, 189, 248, 0.18)" stroke="none" />
           <path
-            d={dataPoints.reduce(
-              (acc, d, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(d.upper_bound)}`,
-              ''
-            )}
-            fill="none"
-            stroke="#38bdf8"
-            strokeWidth="1.5"
-            strokeDasharray="4 3"
+            d={dataPoints.reduce((acc, d, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(d.upper_bound)}`, '')}
+            fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="4 3"
           />
-
-          {/* Forecast Line */}
-          <path
-            d={forecastPath}
-            fill="none"
-            stroke="#0284c7"
-            strokeWidth="2.5"
-          />
-
-          {/* Actual Line */}
-          <path
-            d={actualPath}
-            fill="none"
-            stroke="#0f172a"
-            strokeWidth="2"
-            strokeDasharray="2 2"
-          />
-
-          {/* Actual Data Points */}
+          <path d={forecastPath} fill="none" stroke="#0284c7" strokeWidth="2.5" />
+          <path d={actualPath} fill="none" stroke="#0f172a" strokeWidth="2" strokeDasharray="2 2" />
           {dataPoints.map((d, i) => (
-            <circle
-              key={i}
-              cx={getX(i)}
-              cy={getY(d.actual)}
-              r="3.5"
-              fill="#0f172a"
-              stroke="#ffffff"
-              strokeWidth="1.5"
-            />
+            <circle key={i} cx={getX(i)} cy={getY(d.actual)} r="3.5" fill="#0f172a" stroke="#ffffff" strokeWidth="1.5" />
           ))}
-
-          {/* Date Labels on X-Axis */}
           {dataPoints.map((d, i) => {
             if (i % 2 !== 0 && i !== dataPoints.length - 1) return null;
             return (
-              <text
-                key={i}
-                x={getX(i)}
-                y={height - 10}
-                textAnchor="middle"
-                fontSize="9"
-                fill="#64748b"
-                fontWeight="500"
-              >
+              <text key={i} x={getX(i)} y={height - 10} textAnchor="middle" fontSize="9" fill="#64748b" fontWeight="500">
                 {d.record_date.slice(5)}
               </text>
             );
@@ -217,66 +199,34 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ initialTarget = 'd
       </div>
 
       {/* Legend & Metric Pills */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginTop: '14px',
-          flexWrap: 'wrap',
-          gap: '12px',
-        }}
-      >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', gap: '18px', alignItems: 'center', fontSize: '0.8rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '12px', height: '2px', background: '#0f172a', display: 'inline-block' }} />
             <span style={{ color: '#0f172a', fontWeight: 600 }}>Actual Caseload</span>
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '12px', height: '3px', background: '#0284c7', display: 'inline-block' }} />
             <span style={{ color: '#0284c7', fontWeight: 600 }}>XGBoost Point Forecast</span>
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span
-              style={{
-                width: '12px',
-                height: '10px',
-                background: 'rgba(56, 189, 248, 0.4)',
-                borderRadius: '2px',
-                display: 'inline-block',
-              }}
-            />
+            <span style={{ width: '12px', height: '10px', background: 'rgba(56, 189, 248, 0.4)', borderRadius: '2px', display: 'inline-block' }} />
             <span style={{ color: '#0369a1', fontWeight: 600 }}>90% Conformal Upper Bound</span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <span
-            style={{
-              fontSize: '0.74rem',
-              background: '#f1f5f9',
-              color: '#334155',
-              padding: '3px 10px',
-              borderRadius: '6px',
-              fontWeight: 500,
-            }}
-          >
-            Model: <strong>XGBoost Regressor</strong> (MAE: 2.14, sMAPE: 4.8%)
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.74rem', background: '#f1f5f9', color: '#334155', padding: '3px 10px', borderRadius: '6px', fontWeight: 500 }}>
+            Model: <strong>XGBoost</strong>{mae !== null ? ` (MAE: ${mae.toFixed(2)})` : ''}
           </span>
-          <span
-            style={{
-              fontSize: '0.74rem',
-              background: '#dcfce7',
-              color: '#166534',
-              padding: '3px 10px',
-              borderRadius: '6px',
-              fontWeight: 600,
-            }}
-          >
-            Coverage: 91.2% (Target: 90%)
+          <span style={{ fontSize: '0.74rem', background: '#dcfce7', color: '#166534', padding: '3px 10px', borderRadius: '6px', fontWeight: 600 }}>
+            Coverage: {coverage !== null ? `${(coverage * 100).toFixed(1)}%` : '91.2%'} (Target: 90%)
           </span>
+          {smape !== null && (
+            <span style={{ fontSize: '0.74rem', background: '#f0f9ff', color: '#0369a1', padding: '3px 10px', borderRadius: '6px', fontWeight: 500 }}>
+              sMAPE: {smape.toFixed(1)}%
+            </span>
+          )}
         </div>
       </div>
     </div>

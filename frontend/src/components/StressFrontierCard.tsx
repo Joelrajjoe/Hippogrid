@@ -1,14 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Activity, CheckCircle, XCircle, Edit3 } from 'lucide-react';
+import { api, StressFrontierPoint } from '../services/api';
 
-interface FrontierPointData {
-  shock_size: number;
-  plausibility: number;
-  failure_probability_without_intervention: number;
-  failure_probability_with_intervention: number;
-  phcs_compromised_without: number;
-  threshold_breached: boolean;
-}
+type FrontierPointData = StressFrontierPoint;
 
 // Sample Resilience Frontier Points across normalized shock severity
 const SAMPLE_FRONTIER: FrontierPointData[] = [
@@ -24,6 +18,35 @@ const SAMPLE_FRONTIER: FrontierPointData[] = [
 
 export const StressFrontierCard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'frontier' | 'review'>('frontier');
+  const [frontierData, setFrontierData] = useState<FrontierPointData[]>(SAMPLE_FRONTIER);
+  const [_loading, setLoading] = useState(false);
+  const [_backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [_minimalShock, setMinimalShock] = useState<any>(null);
+
+  const loadFrontier = async () => {
+    setLoading(true);
+    try {
+      const res = await api.stressFrontier();
+      const raw = (res as any).frontier_data || res;
+      if (Array.isArray(raw) && raw.length > 0) {
+        setFrontierData(raw);
+        setMinimalShock((res as any).minimal_compound_shock || null);
+        setBackendOnline(true);
+      } else {
+        setFrontierData(SAMPLE_FRONTIER);
+        setBackendOnline(true);
+      }
+    } catch {
+      setFrontierData(SAMPLE_FRONTIER);
+      setBackendOnline(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadFrontier();
+  }, []);
 
   // Review state demo
   const [reviewDecisions, setReviewDecisions] = useState<{ [key: string]: string }>({
@@ -42,19 +65,19 @@ export const StressFrontierCard: React.FC = () => {
   const getY = (prob: number) => padding.top + plotH - prob * plotH;
 
   // Build SVG path for Unmitigated Failure Line
-  const unmitigatedPath = SAMPLE_FRONTIER.reduce(
+  const unmitigatedPath = frontierData.reduce(
     (acc, d, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${getX(d.shock_size)} ${getY(d.failure_probability_without_intervention)}`,
     ''
   );
 
   // Build SVG path for HippoGrid Mitigated Line
-  const mitigatedPath = SAMPLE_FRONTIER.reduce(
+  const mitigatedPath = frontierData.reduce(
     (acc, d, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${getX(d.shock_size)} ${getY(d.failure_probability_with_intervention)}`,
     ''
   );
 
   // Smallest breach point (threshold breached without intervention)
-  const breachPoint = SAMPLE_FRONTIER.find((p) => p.threshold_breached) || SAMPLE_FRONTIER[3];
+  const breachPoint = frontierData.find((p) => p.threshold_breached) || frontierData[3] || SAMPLE_FRONTIER[3];
 
   return (
     <div className="panel-card" style={{ marginTop: '20px' }}>

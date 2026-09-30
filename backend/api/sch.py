@@ -63,6 +63,7 @@ def get_all_sch(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     for p in phc_list:
         p_code = p.code if hasattr(p, "code") else p["code"]
         p_id = str(p.id) if hasattr(p, "id") else p["id"]
+        p_name = p.name if hasattr(p, "name") else p.get("name", p_code) if isinstance(p, dict) else p_code
         telemetry = _get_mock_or_db_telemetry(p_code)
 
         for svc in graph.list_services():
@@ -70,6 +71,9 @@ def get_all_sch(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
             results.append(
                 {
                     "phc_id": assessment.phc_id,
+                    "phc_code": p_code,
+                    "phc_name": p_name,
+                    "service_id": svc.id,
                     "service": assessment.service,
                     "sch_hours": assessment.sch_hours,
                     "status": assessment.status,

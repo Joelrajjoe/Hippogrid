@@ -115,6 +115,7 @@ def get_forecasts(
         "conformal_quantile_q": round(q_hat, 2),
         "nominal_confidence": 0.90,
         "chart_data": recent_chart,
+        "data_points": recent_chart,  # Alias for frontend compatibility
     }
 
 

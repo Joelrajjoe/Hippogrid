@@ -1,4 +1,5 @@
-import { Bell, User, Calendar, MapPin } from 'lucide-react';
+import React from 'react';
+import { Bell, User, Calendar, MapPin, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
   selectedState: string;
@@ -8,6 +9,7 @@ interface HeaderProps {
   currentDate?: string;
   unreadAlertCount?: number;
   realtimeActive?: boolean;
+  onRefresh?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +20,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentDate = 'Wednesday, 30 Sep 2026',
   unreadAlertCount = 2,
   realtimeActive = true,
+  onRefresh,
 }) => {
   return (
     <header className="top-header" style={{ padding: '0 28px', height: '82px' }}>
@@ -107,8 +110,26 @@ export const Header: React.FC<HeaderProps> = ({
               display: 'inline-block',
             }}
           />
-          <span>{realtimeActive ? 'Supabase Realtime Live' : 'Polling Sync'}</span>
+          <span>{realtimeActive ? 'Live · Backend Online' : 'Backend Offline · Sample Data'}</span>
         </div>
+
+        {/* Manual Refresh Button */}
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            title="Refresh all data from backend"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '5px',
+              padding: '6px 12px', borderRadius: '20px',
+              border: '1px solid #e2e8f0', background: '#ffffff',
+              fontSize: '0.76rem', fontWeight: 600, cursor: 'pointer',
+              color: '#0284c7', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+            }}
+          >
+            <RefreshCw size={13} />
+            Refresh
+          </button>
+        )}
 
         {/* Notifications Icon with Badge */}
         <div style={{ position: 'relative' }}>
